@@ -1,8 +1,10 @@
+import java.io.File
 import scala.io.Source
 
 object app {
   def main(args: Array[String]): Unit = {
 
+    /*
     // Create test source code for lexer
     val source = Source.fromString("LABEL loop PRINT \"hello world\" GOTO #this is comment\n 123.23132 +->= == !")
     val lexer = Lexer(source.buffered)
@@ -16,5 +18,14 @@ object app {
     }
 
     printLexer(lexer)
+    */
+
+    val path = new File(getClass.getClassLoader.getResource("hello.tiny").getPath)
+    val inputFile = scala.io.Source.fromFile(path).buffered
+    val lexer = Lexer(inputFile)
+    val parser = Parser(lexer)
+    println("Tiny Basic Compiler")
+    parser.program
+    println("Parsing completed")
   }
 }
