@@ -1,24 +1,26 @@
 import TokenType._
+import scala.collection.mutable.Set
 
 class Parser(lexer: Lexer) {
 
-  val symbols: scala.collection.mutable.Set[Token] = scala.collection.mutable.Set() // Variables declared so far.
-  val labelsDeclared: scala.collection.mutable.Set[Token] = scala.collection.mutable.Set() // Labels declared so far.
-  val labelsGotoed: scala.collection.mutable.Set[Token] = scala.collection.mutable.Set() // Labels goto'ed so far.
+  val symbols: Set[Token] = Set() // Variables declared so far.
+  val labelsDeclared: Set[Token] = Set() // Labels declared so far.
+  val labelsGotoed: Set[Token] = Set() // Labels goto'ed so far.
 
   var curToken: Token = null
   var peekToken: Token = null
-  
+
   // init
   nextToken
   nextToken
-  
+
+
   // Return true if the current token matches
   def checkToken(tokType: TokenType): Boolean = tokType == curToken.tokType
-  
+
   // Return true if the next token matches
   def checkPeek(tokType: TokenType): Boolean = tokType == peekToken.tokType
-  
+
   // Try to match current token. If not, error. Advances the current token
   def matchToken(tokType: TokenType) =
     if (!checkToken(tokType)) abort("Expected " + tokType + ", got " + curToken.tokType)
@@ -32,7 +34,11 @@ class Parser(lexer: Lexer) {
   def nextToken =
     curToken = peekToken
     peekToken = lexer.getToken
-  
+
+  // Return true if the current token is a comparison operator.
+  def isComparisonOperator =
+    checkToken(GT) || checkToken(GTEQ) || checkToken(LT) || checkToken(LTEQ) || checkToken(EQEQ) || checkToken(NOTEQ)
+
   // Print error message and exit
   def abort(message: String) =
     Console.err.println("Error. " + message)
@@ -46,123 +52,194 @@ class Parser(lexer: Lexer) {
     println("PROGRAM")
 
     // Skip newlines at the start of input
+    skipNewlines
+
+    // Parse all the statements in the program
+    parseStatements
+
+    // Check that each label referenced in a GOTO is declared.
+    labelsGotoed.foreach { label =>
+      if (!labelsGotoed.contains(label))
+        abort("Attempting to GOTO to undeclared label: " + label)
+    }
+
     def skipNewlines: Unit =
       if (checkToken(NEWLINE))
         nextToken
         skipNewlines
 
-    // Parse all the statements in the program
     def parseStatements: Unit =
       if (!checkToken(EOF))
         statement
         parseStatements
-
-    // Check that each label referenced in a GOTO is declared.
-    def checkLabels(): Unit = {
-
-    }
-
-    skipNewlines
-    parseStatements
-    labelsGotoed.foreach { label =>
-      if (!labelsGotoed.contains(label))
-        abort("Attempting to GOTO to undeclared label: " + label)
-    }
   }
 
+
+
+
   def statement: Unit = {
-    // "PRINT" (expression | string)
-    if (checkToken(PRINT)) {
-      println("STATEMENT-PRINT")
-      nextToken
-
-      if (checkToken(STRING))
-        // Simple string
+    curToken.tokType match {
+      // "PRINT" (expression | string)
+      case PRINT => {
+        println("STATEMENT-PRINT")
         nextToken
-      else
-        // Expect an expression
+
+        if (checkToken(STRING))
+          // Simple string
+          nextToken
+        else
+          // Expect an expression
+          expression
+      }
+
+      // "IF" comparison "THEN" {statement} "ENDIF"
+      case IF => {
+        print("STATEMENT-IF")
+        nextToken
+        comparison
+
+        matchToken(THEN)
+        nl
+
+        statementsRec(ENDIF)
+      }
+      // "WHILE" comparison "REPEAT"  {statement} "ENDWHILE"
+      case WHILE => {
+        println("STATEMENT-WHILE")
+        nextToken
+        comparison
+
+        matchToken(REPEAT)
+        nl
+
+        statementsRec(ENDWHILE)
+      }
+
+      // "LABEL" ident
+      case LABEL => {
+        println("STATEMENT-LABEL")
+        nextToken
+        if (labelsDeclared.contains(curToken)) abort("Label already exists: " + curToken)
+        labelsDeclared += curToken
+        matchToken(IDENT)
+      }
+
+      // "GOTO" ident
+      case GOTO => {
+        println("STATEMENT-GOTO")
+        nextToken
+        labelsGotoed += curToken
+        matchToken(IDENT)
+      }
+
+      // "LET" ident
+      case LET => {
+        println("STATEMENT-LET")
+        nextToken
+
+        // Check if ident exists in symbol table. If not, declare it.
+        if (!symbols.contains(curToken)) symbols += curToken
+
+        matchToken(IDENT)
+        matchToken(EQ)
         expression
-    }
-    // "IF" comparison "THEN" {statement} "ENDIF"
-    else if (checkToken(IF)) {
-      print("STATEMENT-IF")
-      nextToken
-      comparison
-
-      matchToken(THEN)
-      nl
-
-      statementsRec
-
-      // Zero or more statements in the body
-      def statementsRec: Unit = {
-        if (!checkToken(ENDIF))
-          statement
-          statementsRec
-        else matchToken(ENDIF)
       }
-    }
-    // "WHILE" comparison "REPEAT"  {statement} "ENDWHILE"
-    else if (checkToken(WHILE)) {
-      println("STATEMENT-WHILE")
-      nextToken
-      comparison
 
-      matchToken(REPEAT)
-      nl
+      // "INPUT" ident
+      case INPUT => {
+        println("STATEMENT-INPUT")
+        nextToken
 
-      statementsRec
+        // If variable doesn't already exist, declare it.
+        if (!symbols.contains(curToken)) symbols += curToken
 
-      // Zero or more statements in the loop body
-      def statementsRec: Unit = {
-        if (!checkToken(ENDWHILE))
-          statement
-          statementsRec
-        else matchToken(ENDWHILE)
+        matchToken(IDENT)
       }
-    }
-    // "LABEL" ident
-    else if (checkToken(LABEL)) {
-      println("STATEMENT-LABEL")
-      nextToken
-      if (labelsDeclared.contains(curToken)) abort("Label already exists: " + curToken)
-      labelsDeclared += curToken
-      matchToken(IDENT)
-    }
-    // "GOTO" ident
-    else if (checkToken(GOTO)) {
-      println("STATEMENT-GOTO")
-      nextToken
-      labelsGotoed += curToken
-      matchToken(IDENT)
-    }
-    // "LET" ident
-    else if (checkToken(LET)) {
-      println("STATEMENT-LET")
-      nextToken
 
-      // Check if ident exists in symbol table. If not, declare it.
-      if (!symbols.contains(curToken)) symbols += curToken
-
-      matchToken(IDENT)
-      matchToken(EQ)
-      expression
+      // This is not a valid statement. Error!
+      case _ => abort("Invalid statement at " + curToken)
     }
-    // "INPUT" ident
-    else if (checkToken(INPUT)) {
-      println("STATEMENT-INPUT")
-      nextToken
-
-      // If variable doesn't already exist, declare it.
-      if (!symbols.contains(curToken)) symbols += curToken
-
-      matchToken(IDENT)
-    }
-    // This is not a valid statement. Error!
-    else abort("Invalid statement at " + curToken)
 
     // Newline
     nl
+
+    def statementsRec(tokType: TokenType): Unit = {
+      if (!checkToken(tokType))
+        statement
+        statementsRec(tokType)
+      else matchToken(tokType)
+    }
+  }
+
+  // comparison ::= expression (("==" | "!=" | ">" | ">=" | "<" | "<=") expression)+
+  def comparison = {
+    println("COMPARISON")
+    expression
+    // Must be at least one comparison operator and another expression.
+    if (isComparisonOperator)
+      comparisonRec
+    else
+      abort("Expected comparison operator at: " + curToken)
+
+    def comparisonRec: Unit = {
+      if (isComparisonOperator) {
+        nextToken
+        expression
+        comparisonRec
+      }
+    }
+  }
+
+  // expression ::= term {( "-" | "+" ) term}
+  def expression = {
+    println("EXPRESSION")
+    term
+    // Can have 0 or more +/- and expressions.
+    expressionRec
+
+    def expressionRec: Unit = {
+      if (checkToken(PLUS) || checkToken(MINUS)) {
+        nextToken
+        term
+        expressionRec
+      }
+    }
+  }
+
+  // term ::= unary {( "/" | "*" ) unary}
+  def term = {
+    println("TERM")
+    unary
+    // Can have 0 or more +/- and expressions.
+    termRec
+
+    def termRec: Unit = {
+      if (checkToken(ASTERISK) || checkToken(SLASH)) {
+        nextToken
+        unary
+        termRec
+      }
+    }
+  }
+
+  // unary ::= ["+" | "-"] primary
+  def unary = {
+    println("UNARY")
+    // Optional unary +/-
+    if (checkToken(PLUS) || checkToken(MINUS)) nextToken
+    primary
+  }
+
+  // primary ::= number | ident
+  def primary = {
+    println(s"PRIMARY ($curToken)")
+
+    if (checkToken(NUMBER)) nextToken
+    else if (checkToken(IDENT))
+      // Ensure the variable already exists.
+      if (!symbols.contains(curToken)) abort("Referencing variable before assignment: " + curToken)
+      nextToken
+    else abort("Unexpected token at " + curToken)
   }
 
   // nl ::= '\n\+
@@ -177,89 +254,5 @@ class Parser(lexer: Lexer) {
       if (checkToken(NEWLINE))
         nextToken
         nlRec
-  }
-
-  // expression ::= term {( "-" | "+" ) term}
-  def expression = {
-    def expressionRec: Boolean = {
-      if (checkToken(PLUS) || checkToken(MINUS)) {
-        nextToken
-        term
-        expressionRec
-      }
-      else true
-    }
-
-    println("EXPRESSION")
-
-    term
-    // Can have 0 or more +/- and expressions.
-    expressionRec
-  }
-
-  // comparison ::= expression (("==" | "!=" | ">" | ">=" | "<" | "<=") expression)+
-  def comparison = {
-    def comparisonRec: Boolean = {
-      if (isComparisonOperator) {
-        nextToken
-        expression
-        comparisonRec
-      }
-      else true
-    }
-
-    println("COMPARISON")
-
-    expression
-    // Must be at least one comparison operator and another expression.
-    if (isComparisonOperator)
-      comparisonRec
-    else
-      abort("Expected comparison operator at: " + curToken)
-  }
-
-  // Return true if the current token is a comparison operator.
-  def isComparisonOperator =
-    checkToken(GT) || checkToken(GTEQ) || checkToken(LT) || checkToken(LTEQ) || checkToken(EQEQ) || checkToken(NOTEQ)
-
-  // term ::= unary {( "/" | "*" ) unary}
-  def term = {
-    def termRec: Boolean = {
-      if (checkToken(ASTERISK) || checkToken(SLASH)) {
-        nextToken
-        unary
-        termRec
-      }
-      else true
-    }
-
-    println("TERM")
-
-    unary
-    // Can have 0 or more +/- and expressions.
-    termRec
-  }
-
-  // unary ::= ["+" | "-"] primary
-  def unary = {
-    println("UNARY")
-
-    // Optional unary +/-
-    if (checkToken(PLUS) || checkToken(MINUS))
-      nextToken
-
-    primary
-  }
-
-  // primary ::= number | ident
-  def primary = {
-    println(s"PRIMARY ($curToken)")
-
-    if (checkToken(NUMBER)) nextToken
-    else if (checkToken(IDENT))
-      // Ensure the variable already exists.
-      if (!symbols.contains(curToken)) abort("Referencing variable before assignment: " + curToken)
-      nextToken
-    else abort("Unexpected token at " + curToken)
   }
 }
