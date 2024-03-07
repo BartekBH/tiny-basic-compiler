@@ -1,7 +1,7 @@
 import TokenType._
 import scala.collection.mutable.Set
 
-class Parser(lexer: Lexer) {
+class Parser(lexer: Lexer, emitter: Emitter) {
 
   val symbols: Set[Token] = Set() // Variables declared so far.
   val labelsDeclared: Set[Token] = Set() // Labels declared so far.
@@ -49,13 +49,17 @@ class Parser(lexer: Lexer) {
 
   // program ::= {statement}
   def program = {
-    println("PROGRAM")
+    emitter.headerLine("#include <stdio.h>")
+    emitter.headerLine("int main(void){")
 
     // Skip newlines at the start of input
     skipNewlines
 
     // Parse all the statements in the program
     parseStatements
+
+    emitter.emitLine("return 0;")
+    emitter.emitLine("}")
 
     // Check that each label referenced in a GOTO is declared.
     labelsGotoed.foreach { label =>
@@ -74,85 +78,98 @@ class Parser(lexer: Lexer) {
         parseStatements
   }
 
-
-
-
   def statement: Unit = {
     curToken.tokType match {
       // "PRINT" (expression | string)
       case PRINT => {
-        println("STATEMENT-PRINT")
         nextToken
 
         if (checkToken(STRING))
-          // Simple string
+          // Print simple string
+          emitter.emitLine(s"printf(\"${curToken.tokText}\\n\");")
           nextToken
         else
-          // Expect an expression
+          // Expect an expression and print the result as a float
+          emitter.emit("printf(\"%.2f\\n\", (float)(")
           expression
+          emitter.emitLine("));")
       }
 
       // "IF" comparison "THEN" {statement} "ENDIF"
       case IF => {
-        print("STATEMENT-IF")
         nextToken
+        emitter.emit("if(")
         comparison
 
         matchToken(THEN)
         nl
+        emitter.emitLine("){")
 
         statementsRec(ENDIF)
       }
       // "WHILE" comparison "REPEAT"  {statement} "ENDWHILE"
       case WHILE => {
-        println("STATEMENT-WHILE")
         nextToken
+        emitter.emit("while(")
         comparison
 
         matchToken(REPEAT)
         nl
+        emitter.emitLine("){")
 
         statementsRec(ENDWHILE)
       }
 
       // "LABEL" ident
       case LABEL => {
-        println("STATEMENT-LABEL")
         nextToken
+        // Make sure this label doesn't already exist
         if (labelsDeclared.contains(curToken)) abort("Label already exists: " + curToken)
         labelsDeclared += curToken
+
+        emitter.emitLine(curToken.tokText + ":")
         matchToken(IDENT)
       }
 
       // "GOTO" ident
       case GOTO => {
-        println("STATEMENT-GOTO")
         nextToken
         labelsGotoed += curToken
+        emitter.emitLine(s"goto ${curToken.tokText};")
         matchToken(IDENT)
       }
 
       // "LET" ident
       case LET => {
-        println("STATEMENT-LET")
         nextToken
 
         // Check if ident exists in symbol table. If not, declare it.
-        if (!symbols.contains(curToken)) symbols += curToken
+        if (!symbols.contains(curToken))
+          symbols += curToken
+          emitter.headerLine(s"float ${curToken.tokText};")
 
+        emitter.emit(s"${curToken.tokText} = ")
         matchToken(IDENT)
         matchToken(EQ)
         expression
+        emitter.emitLine(";")
       }
 
       // "INPUT" ident
       case INPUT => {
-        println("STATEMENT-INPUT")
         nextToken
 
         // If variable doesn't already exist, declare it.
-        if (!symbols.contains(curToken)) symbols += curToken
+        if (!symbols.contains(curToken))
+          symbols += curToken
+          emitter.headerLine(s"float ${curToken.tokText};")
 
+        // Emit scanf and validate the input. If invalid, set the variable to 0 and clear the input
+        emitter.emitLine(s"if(0 == scanf(\"%" + s"f\", &${curToken.tokText})) {")
+        emitter.emitLine(s"${curToken.tokText} = 0;")
+        emitter.emit("scanf(\"%")
+        emitter.emitLine("*s\");")
+        emitter.emitLine("}")
         matchToken(IDENT)
       }
 
@@ -167,22 +184,27 @@ class Parser(lexer: Lexer) {
       if (!checkToken(tokType))
         statement
         statementsRec(tokType)
-      else matchToken(tokType)
+      else
+        matchToken(tokType)
+        emitter.emitLine("}")
     }
   }
 
   // comparison ::= expression (("==" | "!=" | ">" | ">=" | "<" | "<=") expression)+
   def comparison = {
-    println("COMPARISON")
     expression
     // Must be at least one comparison operator and another expression.
     if (isComparisonOperator)
+      emitter.emit(curToken.tokText)
+      nextToken
+      expression
       comparisonRec
     else
       abort("Expected comparison operator at: " + curToken)
 
     def comparisonRec: Unit = {
       if (isComparisonOperator) {
+        emitter.emit(curToken.tokText)
         nextToken
         expression
         comparisonRec
@@ -192,13 +214,13 @@ class Parser(lexer: Lexer) {
 
   // expression ::= term {( "-" | "+" ) term}
   def expression = {
-    println("EXPRESSION")
     term
     // Can have 0 or more +/- and expressions.
     expressionRec
 
     def expressionRec: Unit = {
       if (checkToken(PLUS) || checkToken(MINUS)) {
+        emitter.emit(curToken.tokText)
         nextToken
         term
         expressionRec
@@ -208,13 +230,13 @@ class Parser(lexer: Lexer) {
 
   // term ::= unary {( "/" | "*" ) unary}
   def term = {
-    println("TERM")
     unary
     // Can have 0 or more +/- and expressions.
     termRec
 
     def termRec: Unit = {
       if (checkToken(ASTERISK) || checkToken(SLASH)) {
+        emitter.emit(curToken.tokText)
         nextToken
         unary
         termRec
@@ -224,27 +246,28 @@ class Parser(lexer: Lexer) {
 
   // unary ::= ["+" | "-"] primary
   def unary = {
-    println("UNARY")
     // Optional unary +/-
-    if (checkToken(PLUS) || checkToken(MINUS)) nextToken
+    if (checkToken(PLUS) || checkToken(MINUS))
+      emitter.emit(curToken.tokText)
+      nextToken
     primary
   }
 
   // primary ::= number | ident
   def primary = {
-    println(s"PRIMARY ($curToken)")
-
-    if (checkToken(NUMBER)) nextToken
+    if (checkToken(NUMBER))
+      emitter.emit(curToken.tokText)
+      nextToken
     else if (checkToken(IDENT))
       // Ensure the variable already exists.
       if (!symbols.contains(curToken)) abort("Referencing variable before assignment: " + curToken)
+      emitter.emit(curToken.tokText)
       nextToken
     else abort("Unexpected token at " + curToken)
   }
 
   // nl ::= '\n\+
   def nl: Unit = {
-    println("NEWLINE")
 
     // Require at least one new line (or EOF)
     matchToken(NEWLINE, EOF)
