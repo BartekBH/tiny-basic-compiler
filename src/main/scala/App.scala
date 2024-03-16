@@ -1,7 +1,7 @@
 import java.io.File
 import scala.io.Source
 
-object app {
+object App {
   def main(args: Array[String]): Unit = {
 
     println("Tiny Basic Compiler")
