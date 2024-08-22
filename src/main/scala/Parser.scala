@@ -1,4 +1,5 @@
-import TokenType._
+import TokenType.*
+
 import scala.collection.mutable.Set
 
 class Parser(lexer: Lexer, emitter: Emitter) {
@@ -6,6 +7,8 @@ class Parser(lexer: Lexer, emitter: Emitter) {
   val symbols: Set[Token] = Set() // Variables declared so far.
   val labelsDeclared: Set[Token] = Set() // Labels declared so far.
   val labelsGotoed: Set[Token] = Set() // Labels goto'ed so far.
+  val lexingErrors: Set[String] = Set()
+  val parsingErrors: Set[String] = Set()
 
   var curToken: Token = null
   var peekToken: Token = null
@@ -23,28 +26,27 @@ class Parser(lexer: Lexer, emitter: Emitter) {
 
   // Try to match current token. If not, error. Advances the current token
   def matchToken(tokType: TokenType) =
-    if (!checkToken(tokType)) abort("Expected " + tokType + ", got " + curToken.tokType)
+    if (!checkToken(tokType)) parsingErrors += ("Expected " + tokType + ", got " + curToken.tokType)
     nextToken
 
   def matchToken(tokType1: TokenType, tokType2: TokenType) =
-    if (!checkToken(tokType1) && !checkToken(tokType2)) abort(s"Expected $tokType1 or $tokType2, got $curToken.tokType")
+    if (!checkToken(tokType1) && !checkToken(tokType2)) parsingErrors += (s"Expected $tokType1 or $tokType2, got $curToken.tokType")
     nextToken
 
   // Advances the current token
   def nextToken =
     curToken = peekToken
-    peekToken = lexer.getToken
+    peekToken = lexer.getToken match {
+      case Right(token) => token
+      case Left(er) =>
+        lexingErrors += er
+        peekToken
+    }
 
   // Return true if the current token is a comparison operator.
   def isComparisonOperator =
     checkToken(GT) || checkToken(GTEQ) || checkToken(LT) || checkToken(LTEQ) || checkToken(EQEQ) || checkToken(NOTEQ)
-
-  // Print error message and exit
-  def abort(message: String) =
-    Console.err.println("Error. " + message)
-    sys.exit(0)
-
-
+  
   // Production rules
 
   // program ::= {statement}
@@ -64,7 +66,7 @@ class Parser(lexer: Lexer, emitter: Emitter) {
     // Check that each label referenced in a GOTO is declared.
     labelsGotoed.foreach { label =>
       if (!labelsGotoed.contains(label))
-        abort("Attempting to GOTO to undeclared label: " + label)
+        parsingErrors += ("Attempting to GOTO to undeclared label: " + label)
     }
 
     def skipNewlines: Unit =
@@ -124,7 +126,7 @@ class Parser(lexer: Lexer, emitter: Emitter) {
       case LABEL => {
         nextToken
         // Make sure this label doesn't already exist
-        if (labelsDeclared.contains(curToken)) abort("Label already exists: " + curToken)
+        if (labelsDeclared.contains(curToken)) parsingErrors += ("Label already exists: " + curToken)
         labelsDeclared += curToken
 
         emitter.emitLine(curToken.tokText + ":")
@@ -174,7 +176,7 @@ class Parser(lexer: Lexer, emitter: Emitter) {
       }
 
       // This is not a valid statement. Error!
-      case _ => abort("Invalid statement at " + curToken)
+      case _ => parsingErrors += ("Invalid statement at " + curToken)
     }
 
     // Newline
@@ -200,7 +202,7 @@ class Parser(lexer: Lexer, emitter: Emitter) {
       expression
       comparisonRec
     else
-      abort("Expected comparison operator at: " + curToken)
+      parsingErrors += ("Expected comparison operator at: " + curToken)
 
     def comparisonRec: Unit = {
       if (isComparisonOperator) {
@@ -260,10 +262,10 @@ class Parser(lexer: Lexer, emitter: Emitter) {
       nextToken
     else if (checkToken(IDENT))
       // Ensure the variable already exists.
-      if (!symbols.contains(curToken)) abort("Referencing variable before assignment: " + curToken)
+      if (!symbols.contains(curToken)) parsingErrors += ("Referencing variable before assignment: " + curToken)
       emitter.emit(curToken.tokText)
       nextToken
-    else abort("Unexpected token at " + curToken)
+    else parsingErrors += ("Unexpected token at " + curToken)
   }
 
   // nl ::= '\n\+

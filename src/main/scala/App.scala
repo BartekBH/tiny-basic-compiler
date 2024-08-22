@@ -18,9 +18,13 @@ object App {
     // Start the parser
     parser.program
 
-    // Write the output to file
-    emitter.writeFile
-
-    println("Parsing completed")
+    // Write the output to file or print errors
+    if (parser.lexingErrors.nonEmpty)
+      println(parser.lexingErrors.mkString("Lexing failed with errors:\n", "\n", ""))
+    else if (parser.parsingErrors.nonEmpty)
+      println("Parsing failed with error:\n" + parser.parsingErrors.head)
+    else
+      emitter.writeFile
+      println("Parsing completed successfully")
   }
 }
