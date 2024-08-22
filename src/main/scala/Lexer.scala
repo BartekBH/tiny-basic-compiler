@@ -20,55 +20,67 @@ class Lexer(buffer: BufferedIterator[Char]) {
   }
 
   // Return string token
-  def getString(acc: String = ""): Token = buffer.headOption match {
+  def getString(acc: StringBuilder = StringBuilder("")): Token = buffer.headOption match {
     case None => abort("Unclosed string")
     case Some(c) => c match {
       case c if List('\r', '\n', '\t', '\\', '%').contains(c) => abort("Illegal character in string")
-      case '\"' => buffer.next(); Token(TokenType.STRING, acc)
-      case _ => buffer.next(); getString(acc + c)
+      case '\"' => buffer.next(); Token(TokenType.STRING, acc.toString())
+      case _ => buffer.next(); getString(acc += c)
     }
   }
 
   // Return number token
-  def getNumber(acc: String = ""): Token = buffer.headOption match {
-    case None => Token(TokenType.NUMBER, acc)
+  def getNumber(acc: StringBuilder = StringBuilder("")): Token = buffer.headOption match {
+    case None => Token(TokenType.NUMBER, acc.toString())
     case Some(c) => c match {
-      case c if c.isDigit => buffer.next(); getNumber(acc + c)
-      case '.' if !acc.contains('.') => buffer.next(); getNumber(acc + c)
+      case c if c.isDigit => buffer.next(); getNumber(acc += c)
+      case '.' if !acc.contains('.') => buffer.next(); getNumber(acc += c)
       case '.' if acc.contains('.') => abort("Multiple points in number")
-      case c if acc.takeRight(1) == "." => abort("Lack of number after point")
-      case _ => Token(TokenType.NUMBER, acc)
+      case c if acc.toString().takeRight(1) == "." => abort("Lack of number after point")
+      case _ => Token(TokenType.NUMBER, acc.toString())
     }
   }
 
   // Return keyword or ident token
-  def getKeywordOrIdent(acc: String = ""): Token = buffer.headOption match {
-    case None => try {
-      Token(TokenType.valueOf(acc), acc)
-    } catch {
-      case _ => Token(TokenType.IDENT, acc)
-    }
-    case Some(c) => c match {
-      case c if c.isLetterOrDigit => buffer.next(); getKeywordOrIdent(acc + c)
-      case _ => try {
-        Token(TokenType.valueOf(acc), acc)
+  def getKeywordOrIdent(acc: StringBuilder = StringBuilder("")): Token = buffer.headOption match {
+    case None =>
+      val result = acc.toString()
+      try {
+        Token(TokenType.valueOf(result), result)
       } catch {
-        case _ => Token(TokenType.IDENT, acc)
+        case _ => Token(TokenType.IDENT, result)
       }
+    case Some(c) => c match {
+      case c if c.isLetterOrDigit => buffer.next(); getKeywordOrIdent(acc += c)
+      case _ =>
+        val result = acc.toString()
+        try {
+          Token(TokenType.valueOf(result), result)
+        } catch {
+          case _ => Token(TokenType.IDENT, result)
+        }
     }
   }
 
   // Return equation operator token
-  def getEqOperator(acc: String = ""): Token = buffer.headOption match {
+  def getEqOperator(acc: StringBuilder = StringBuilder("")): Token = buffer.headOption match {
     case None =>
-      if (acc == "") Token(TokenType.EOF)
-      else if (acc == "!") abort("Expected !=, got !")
-      else Token(TokenType.fromValue(acc), acc)
-    case Some(c) => (c) match {
-      case c if acc == "" => buffer.next(); getEqOperator(acc + c)
-      case '=' => buffer.next(); Token(TokenType.fromValue(acc + c), acc + c)
-      case c if acc == "!"  => abort("Expected !=, got !" + c)
-      case _ => Token(TokenType.fromValue(acc), acc)
+      val result = acc.toString()
+      if (result == "") Token(TokenType.EOF)
+      else if (result == "!") abort("Expected !=, got !")
+      else Token(TokenType.fromValue(result), result)
+    case Some(c) => c match {
+      case c if acc.toString() == "" =>
+        buffer.next()
+        getEqOperator(acc += c)
+      case '=' =>
+        buffer.next()
+        val result = (acc += c).toString()
+        Token(TokenType.fromValue(result), result)
+      case c if acc.toString() == "!" => abort("Expected !=, got !" + c)
+      case _ => 
+        val result = acc.toString()
+        Token(TokenType.fromValue(result), result)
     }
   }
 
